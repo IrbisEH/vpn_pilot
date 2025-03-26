@@ -1,0 +1,3 @@
+sudo ip netns exec vase xl2tpd -c /etc/xl2tpd/xl2tpd.conf -D
+sudo ip netns exec vase ipsec restart
+sudo ip netns exec vase ipsec up vase_vpn
