@@ -86,8 +86,11 @@ Configure() {
   # add NAT rule
   iptables -t nat -A POSTROUTING -s "$SUBNET" -o "$LAN_INTFS" -j MASQUERADE
 
-  ufw route allow in on $INTFS_DS out on $LAN_INTFS
-  ufw route allow in on $LAN_INTFS out on $INTFS_DS
+#  ufw route allow in on $INTFS_DS out on $LAN_INTFS
+#  ufw route allow in on $LAN_INTFS out on $INTFS_DS
+
+  sudo ufw route allow proto any to 10.0.0.2
+  sudo ufw route allow proto any from 10.0.0.2
 }
 
 ConfigureVPN() {
@@ -109,11 +112,6 @@ EOF
   cat > "/etc/ipsec.secrets" <<EOF
 %any $VPN_SERVER_IP : PSK "$VPN_IPSEC_PSK"
 EOF
-
-#  cat > "/etc/ipsec.secrets" <<EOF
-#conn $VPN_NAME
-#: PSK "$VPN_IPSEC_PSK"
-#EOF
 
   chmod 600 "/etc/ipsec.secrets"
 
@@ -160,16 +158,6 @@ Start() {
   ip netns exec vase ip route add "$VPN_SERVER_IP" via "$GATEWAY_VS" dev "$INTFS_VS"
   ip netns exec vase ip route del default via "$GATEWAY_VS" dev "$INTFS_VS"
   ip netns exec vase ip route add default dev ppp0
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-      [[ -z "$line" || "$line" =~ ^# ]] && continue
-      mapfile -t ips < <(dig +short "$line" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
-      for ip in "${ips[@]}"; do
-          if [[ -n "$ip" ]]; then
-            ip route add "$ip" via "$GATEWAY_VS"
-          fi
-      done
-  done < "$DOMAINS_LIST"
 }
 
 Stop() {
