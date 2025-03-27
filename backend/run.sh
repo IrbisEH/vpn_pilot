@@ -14,6 +14,8 @@ COMMON_LOG="$LOGS_DIR/common.log"
 XL2TPD_LOG="$LOGS_DIR/xl2tpd.log"
 IPSEC_LOG="$LOGS_DIR/ipsec.log"
 
+DOMAINS_LIST="$DIR_PATH/domains.list"
+
 LIBRARY_FILE="$DIR_PATH/app_bash/library.sh"
 
 . "$LIBRARY_FILE"
@@ -21,6 +23,9 @@ LIBRARY_FILE="$DIR_PATH/app_bash/library.sh"
 
 
 CleanUp() {
+  rm -rf "$XL2TPD_LOG"
+  touch "$XL2TPD_LOG"
+
   # disable ipv4 forwarding default net space
   if [ $(sysctl -n net.ipv4.ip_forward) -eq 1 ]; then
     sysctl -w net.ipv4.ip_forward=0
@@ -143,13 +148,28 @@ EOF
 }
 
 Start() {
-  ip netns exec "$VPN_NAMESPACE" xl2tpd -c /etc/xl2tpd/xl2tpd.conf &
-  sleep 5
-  ip netns exec "$VPN_NAMESPACE" ipsec restart
+  ip netns exec "$VPN_NAMESPACE" xl2tpd -c /etc/xl2tpd/xl2tpd.conf > /dev/null 2>%1 &
+  sleep 1
+  ip netns exec "$VPN_NAMESPACE" ipsec restart || true
   sleep 1
   ip netns exec "$VPN_NAMESPACE" ipsec up $VPN_NAME
   sleep 1
   bash -c "echo 'c $VPN_NAME' > /var/run/xl2tpd/l2tp-control"
+  sleep 5
+
+  ip netns exec vase ip route add "$VPN_SERVER_IP" via "$GATEWAY_VS" dev "$INTFS_VS"
+  ip netns exec vase ip route del default via "$GATEWAY_VS" dev "$INTFS_VS"
+  ip netns exec vase ip route add default dev ppp0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -z "$line" || "$line" =~ ^# ]] && continue
+      mapfile -t ips < <(dig +short "$line" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
+      for ip in "${ips[@]}"; do
+          if [[ -n "$ip" ]]; then
+            ip route add "$ip" via "$GATEWAY_VS"
+          fi
+      done
+  done < "$DOMAINS_LIST"
 }
 
 Stop() {
@@ -163,7 +183,7 @@ Stop() {
 
 Test() {
   while true; do
-    res=$(ip netns exec "$net_space" curl -s ifconfig.me)
+    res=$(ip netns exec "$VPN_NAMESPACE" curl -s ifconfig.me)
 
     if [ "$res" != "$VPN_SERVER_IP" ]; then
       exit 1
@@ -180,12 +200,14 @@ ExitFunction() {
 }
 
 set -x
-#trap ExitFunction EXIT
+trap ExitFunction EXIT
 
 Stop > /dev/null 2>&1
 CleanUp
-#Configure
-#ConfigureVPN > /dev/null 2>&1
-#Start
+Configure
+ConfigureVPN > /dev/null 2>&1
+Start
+
+Test
 
 exit 0
