@@ -5,11 +5,9 @@
 set -e
 
 CHMOD=777
+DIR_PATH=$(realpath "$(dirname "$0")")
 
-# TODO: wrong!!!
-DIR_PATH=$(pwd)
 LOGS_DIR="$DIR_PATH/logs"
-
 ENV_FILE="$DIR_PATH/.env"
 
 COMMON_LOG="$LOGS_DIR/common.log"
@@ -82,6 +80,9 @@ Configure() {
 
   # add NAT rule
   iptables -t nat -A POSTROUTING -s "$SUBNET" -o "$LAN_INTFS" -j MASQUERADE
+
+  ufw route allow in on $INTFS_DS out on $LAN_INTFS
+  ufw route allow in on $LAN_INTFS out on $INTFS_DS
 }
 
 ConfigureVPN() {
@@ -101,9 +102,15 @@ conn $VPN_NAME
 EOF
 
   cat > "/etc/ipsec.secrets" <<EOF
-conn $VPN_NAME
-: PSK $VPN_IPSEC_PSK
+%any $VPN_SERVER_IP : PSK "$VPN_IPSEC_PSK"
 EOF
+
+#  cat > "/etc/ipsec.secrets" <<EOF
+#conn $VPN_NAME
+#: PSK "$VPN_IPSEC_PSK"
+#EOF
+
+  chmod 600 "/etc/ipsec.secrets"
 
   cat > "/etc/xl2tpd/xl2tpd.conf" <<EOF
 [lac $VPN_NAME]
@@ -112,6 +119,8 @@ ppp debug = yes
 pppoptfile = /etc/ppp/options.l2tpd.client
 length bit = yes
 EOF
+
+  chmod 600 "/etc/xl2tpd/xl2tpd.conf"
 
   cat > "/etc/ppp/options.l2tpd.client" <<EOF
 ipcp-accept-local
@@ -130,13 +139,11 @@ name $VPN_USER
 password $VPN_PASSWORD
 EOF
 
-  chmod 600 "/etc/ipsec.secrets"
-  chmod 600 "/etc/xl2tpd/xl2tpd.conf"
   chmod 600 "/etc/ppp/options.l2tpd.client"
 }
 
 Start() {
-  ip netns exec "$VPN_NAMESPACE" xl2tpd -c /etc/xl2tpd/xl2tpd.conf -D &
+  ip netns exec "$VPN_NAMESPACE" xl2tpd -c /etc/xl2tpd/xl2tpd.conf &
   sleep 5
   ip netns exec "$VPN_NAMESPACE" ipsec restart
   sleep 1
@@ -177,9 +184,8 @@ set -x
 
 Stop > /dev/null 2>&1
 CleanUp
-Configure
-ConfigureVPN > /dev/null 2>&1
+#Configure
+#ConfigureVPN > /dev/null 2>&1
 #Start
-
 
 exit 0
